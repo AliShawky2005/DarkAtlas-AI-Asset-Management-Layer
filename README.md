@@ -349,6 +349,20 @@ curl "http://localhost:8001/api/v1/analyze/report?tag=production"
 
 ---
 
+
+## Assumptions
+
+The following assumptions were made during development:
+
+- **Sample dataset not yet received:** The import endpoint accepts any JSON matching the documented asset schema. It is ready to receive the actual DarkAtlas scan dataset when provided.
+- **Metadata merge strategy:** When the same asset is imported twice with conflicting metadata, new values overwrite existing ones for the same key. Existing keys not present in the new import are preserved. Tags are always union-merged (never removed).
+- **Re-appearing stale assets:** If an asset is marked `stale` and then re-imported or re-scanned, it is automatically reset to `active`. This reflects the assumption that re-discovery means the asset is live again.
+- **Single-tenant scope:** Multi-tenant isolation is not implemented. All assets belong to a single shared namespace. This would be the first extension in a production deployment.
+- **LLM for narrative only:** The LLM is never used to make security decisions. All risk scores are produced by deterministic Python rules. The LLM writes human-readable summaries and classifications only.
+- **HTTP in development:** The API runs over HTTP in local/Docker development. In production, HTTPS termination would be handled by a reverse proxy (Nginx, Caddy, or a cloud load balancer).
+- **API key authentication:** Write operations are protected by a static API key (`X-API-Key` header). In production this would be replaced with JWT or OAuth2 with per-user scoping.
+- **Port 8001 locally:** The API is exposed on port 8001 (not 8000) to avoid conflicts with other local services. This can be changed in `docker-compose.yml`.
+
 ## Design Decisions
 
 ### 1. Anti-hallucination grounding strategy
