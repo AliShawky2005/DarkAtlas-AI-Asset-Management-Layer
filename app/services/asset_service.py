@@ -126,8 +126,13 @@ async def _upsert_asset(
         merged_metadata = {**(existing.asset_metadata or {}), **data.metadata}
         existing.asset_metadata = merged_metadata
 
-        # Only update status if explicitly provided and different
-        if data.status != existing.status:
+        # Re-appearing asset rule (Section 7):
+        # If a stale asset shows up again in an import or scan,
+        # it means it was re-discovered — reset it to active.
+        if existing.status == AssetStatus.STALE and data.source.value in ("import", "scan"):
+            existing.status = AssetStatus.ACTIVE
+        elif data.status != existing.status and existing.status != AssetStatus.STALE:
+            # For non-stale assets, respect the incoming status
             existing.status = data.status
 
         await db.flush()  # write to DB within this transaction
