@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL database ─────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine          # alpine = smaller image, same functionality
+    environment:
+      POSTGRES_USER: darkatlas
+      POSTGRES_PASSWORD: darkatlas
+      POSTGRES_DB: darkatlas
+    ports:
+      - "5432:5432"                    # expose so you can connect with psql/DBeaver locally
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # persist data across restarts
+    healthcheck:
+      # pg_isready exits 0 when Postgres is accepting connections.
+      # The API service waits for this before starting (see depends_on below).
+      test: ["CMD-SHELL", "pg_isready -U darkatlas -d darkatlas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── FastAPI application ─────────────────────────────────────────────────────
+  api:
+    build: .                           # build from our Dockerfile
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env                           # your real API keys live here (gitignored)
+    environment:
+      # Override DATABASE_URL to use the Docker service name "db" as the host.
+      # Inside Docker's network, containers talk to each other by service name.
+      # On your local machine, the host would be "localhost" — that's why
+      # .env has "localhost" and we override it here for Docker.
+      DATABASE_URL: postgresql+asyncpg://darkatlas:darkatlas@db:5432/darkatlas
+    depends_on:
+      db:
+        condition: service_healthy     # only start AFTER db passes its healthcheck
+    volumes:
+      - .:/app                         # mount local code into the container
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload                         # auto-restart when you save a file
+
+volumes:
+  postgres_data:                       # named volume — survives `docker-compose down`
