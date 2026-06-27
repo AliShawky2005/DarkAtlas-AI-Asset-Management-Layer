@@ -2,7 +2,21 @@
 
 > **Buguard AI Internship Assessment — Track B: AI Applications**
 
-A LangChain-powered analysis layer for Buguard's DarkAtlas Attack Surface Management platform. This system ingests internet-facing assets, deduplicates them, and exposes four AI-driven analysis features: natural-language querying, risk scoring, automated enrichment, and report generation.
+A LangChain-powered analysis layer for Buguard's DarkAtlas Attack Surface Management platform. This system ingests internet-facing assets, deduplicates them, and exposes an entire suite of AI-driven analysis features. 
+
+**This implementation completes all base requirements AND all 6 bonus requirements!**
+
+---
+
+## 🌟 Key Features & Bonuses Implemented
+
+1. **Multi-tenancy (Bonus 1):** Complete database isolation using `organization_id` and the `X-Org-Id` header.
+2. **Role-Based Access Control (Bonus 2):** Secure API key management with `bcrypt` hashing, supporting `admin` and `reader` roles via `X-API-Key`.
+3. **Graph Visualization (Bonus 3):** An interactive, live D3.js force-directed graph to visualize your assets and their relationships (`GET /graph`).
+4. **Caching & Rate Limiting (Bonus 4):** `slowapi` enforces strict rate limits (60/min globally, 10/min for LLMs). Expensive LLM operations are cached for 5 minutes using `cachetools`.
+5. **ReAct AI Agent (Bonus 5):** An autonomous LangGraph agent (`POST /api/v1/agent/chat`) equipped with 5 tools to query the database and perform analysis dynamically.
+6. **LLM Evaluation Harness (Bonus 6):** An automated "LLM-as-a-judge" module (`POST /api/v1/eval/*`) to score the AI on relevance, clarity, and hallucination detection.
+7. **Core AI Analysis (Track B):** Natural Language Querying, Risk Scoring, Automated Classification & Enrichment, and automated Report Generation.
 
 ---
 
@@ -10,7 +24,6 @@ A LangChain-powered analysis layer for Buguard's DarkAtlas Attack Surface Manage
 
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
-- [Project Structure](#project-structure)
 - [API Endpoints](#api-endpoints)
 - [AI Features — Example Prompts & Outputs](#ai-features--example-prompts--outputs)
 - [Design Decisions](#design-decisions)
@@ -28,8 +41,8 @@ A LangChain-powered analysis layer for Buguard's DarkAtlas Attack Surface Manage
 ### 1. Clone and configure
 
 ```bash
-git clone <your-repo-url>
-cd darkatlas-ai
+git clone https://github.com/AliShawky2005/DarkAtlas-AI-Asset-Management-Layer.git
+cd DarkAtlas-AI-Asset-Management-Layer
 copy .env.example .env        # Windows
 # cp .env.example .env        # Mac/Linux
 ```
@@ -51,360 +64,82 @@ docker-compose up --build
 First run takes 3–5 minutes (downloads PostgreSQL + Python packages).
 Wait for:
 ```
-[DarkAtlas] Tables synced. API v1.0.0 ready.
+[DarkAtlas] Tables synced. API v2.0.0 ready.
 ```
 
-### 3. Verify it works
+### 3. Access the Application
 
-```bash
-curl http://localhost:8001/health
-# → {"status":"ok","version":"1.0.0"}
-
-curl http://localhost:8001/api/v1/analyze/health
-# → {"status":"ok","provider":"groq","model":"llama-3.3-70b-versatile","response":"..."}
-```
-
-### 4. Import sample data
-
-```bash
-curl -X POST http://localhost:8001/api/v1/assets/import \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-api-key-change-in-production" \
-  -d '{
-    "assets": [
-      {
-        "type": "domain",
-        "value": "example.com",
-        "status": "active",
-        "tags": ["production"],
-        "metadata": {}
-      },
-      {
-        "type": "subdomain",
-        "value": "api.example.com",
-        "status": "active",
-        "tags": ["production"],
-        "metadata": {}
-      },
-      {
-        "type": "certificate",
-        "value": "cert.example.com",
-        "status": "stale",
-        "tags": ["production"],
-        "metadata": {"expires_at": "2024-01-01", "issuer": "Lets Encrypt"}
-      },
-      {
-        "type": "service",
-        "value": "22/tcp",
-        "status": "active",
-        "tags": ["production"],
-        "metadata": {"port": 22, "protocol": "tcp"}
-      },
-      {
-        "type": "ip_address",
-        "value": "203.0.113.10",
-        "status": "active",
-        "tags": ["production"],
-        "metadata": {}
-      }
-    ]
-  }'
-```
+- **API Documentation (Swagger):** [http://localhost:8000/docs](http://localhost:8000/docs) (or 8001 depending on your local Docker bindings)
+- **Graph Visualization UI:** [http://localhost:8000/graph](http://localhost:8000/graph)
 
 ---
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                        HTTP Client                          │
 └─────────────────────┬───────────────────────────────────────┘
-                      │
+                      │   X-API-Key (RBAC Auth)
+                      │   X-Org-Id (Multi-tenancy)
 ┌─────────────────────▼───────────────────────────────────────┐
-│                    FastAPI (port 8001)                       │
+│                    FastAPI (port 8000)                      │
 │                                                             │
-│   /api/v1/assets/*          /api/v1/analyze/*               │
-│   ┌──────────────┐          ┌──────────────────────────┐    │
-│   │ Import API   │          │  LangChain Analysis      │    │
-│   │ List / Get   │          │  ┌──────────────────┐    │    │
-│   └──────┬───────┘          │  │ NL Query (Ph.4)  │    │    │
-│          │                  │  │ Risk Score (Ph.5)│    │    │
-│          │                  │  │ Enrichment (Ph.6)│    │    │
-│          │                  │  │ Report Gen (Ph.7)│    │    │
-│          │                  │  └────────┬─────────┘    │    │
-└──────────┼──────────────────┼───────────┼──────────────┘    
-           │                  │           │
-┌──────────▼──────────────────▼─┐   ┌────▼──────────────┐
-│         PostgreSQL             │   │   Groq API        │
-│   assets + asset_relationships │   │ Llama 3.3 70B     │
-└───────────────────────────────┘   └───────────────────┘
+│   /assets/*         /analyze/*             /agent/*         │
+│   ┌──────────────┐  ┌──────────────────┐   ┌────────────┐   │
+│   │ Import API   │  │ NL Query (Ph.4)  │   │ LangGraph  │   │
+│   │ List / Get   │  │ Risk Score (Ph.5)│   │ ReAct Agent│   │
+│   └──────┬───────┘  │ Enrichment (Ph.6)│   └──────┬─────┘   │
+│          │          │ Report Gen (Ph.7)│          │         │
+│          │          └────────┬─────────┘          │         │
+└──────────┼───────────────────┼────────────────────┼─────────┘    
+           │                   │                    │
+┌──────────▼───────────────────▼─┐        ┌─────────▼─────────┐
+│         PostgreSQL             │        │    Groq API       │
+│   assets + organizations       │        │ Llama 3.3 70B     │
+│   api_keys                     │        └───────────────────┘
+└────────────────────────────────┘
 ```
 
-**Key design principle:** The LLM never queries the database directly and never returns asset data from memory. It only translates queries into filters (Phase 4), writes summaries from rule-engine outputs (Phase 5), makes classification decisions (Phase 6), and narrates structured facts (Phase 7). All actual asset data always comes from PostgreSQL.
-
----
-
-## Project Structure
-
-```
-darkatlas-ai/
-├── app/
-│   ├── main.py                      # FastAPI app, lifespan, router registration
-│   ├── config.py                    # Pydantic-settings (reads from .env)
-│   ├── database.py                  # Async SQLAlchemy engine + session factory
-│   ├── api/
-│   │   ├── deps.py                  # Shared dependencies (DB session, API key auth)
-│   │   └── routes/
-│   │       ├── assets.py            # Import, list, get endpoints
-│   │       └── analyze.py           # All 4 AI analysis endpoints
-│   ├── models/
-│   │   └── asset.py                 # SQLAlchemy ORM: Asset, AssetRelationship
-│   ├── schemas/
-│   │   └── asset.py                 # Pydantic schemas: request/response validation
-│   └── services/
-│       ├── asset_service.py         # DB operations: upsert, dedup, list, get
-│       └── analysis/
-│           ├── base.py              # LLM factory, shared prompt utilities
-│           ├── nl_query.py          # Phase 4: NL → structured filter → DB query
-│           ├── risk.py              # Phase 5: Rule engine + LLM summary
-│           ├── enrichment.py        # Phase 6: LLM classification + DB write-back
-│           └── report.py            # Phase 7: Full report generation
-├── tests/
-│   ├── test_risk.py                 # 17 tests: rule engine correctness
-│   └── test_schemas.py              # 17 tests: input validation & normalization
-├── docker-compose.yml               # PostgreSQL + FastAPI orchestration
-├── Dockerfile                       # Python 3.12-slim container
-├── requirements.txt                 # All pinned dependencies
-├── pytest.ini                       # Test configuration
-└── .env.example                     # Environment variable template
-```
+**Anti-Hallucination Design:** The LLM never queries the database directly and never returns raw asset data from memory. It translates queries into strict JSON filters, writes summaries based on strict Python rule-engine outputs, and makes classifications from strict Enums. All database facts remain 100% accurate.
 
 ---
 
 ## API Endpoints
 
-### Health
+### 1. Authentication & Tenancy
+All endpoints require an `X-API-Key` header.
+- **Admin Role:** Can import assets, enrich data, create new keys, and access eval endpoints.
+- **Reader Role:** Read-only access to `/assets`, `/analyze`, and `/agent`.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | API liveness probe |
-| `GET` | `/api/v1/analyze/health` | LLM connection test |
+*To create an org or key, hit `POST /api/v1/orgs` and `POST /api/v1/auth/keys` using the `API_KEY` defined in your `.env`.*
 
-### Asset Management
+### 2. Asset Management (`/api/v1/assets`)
+- `POST /import`: Bulk import assets (deduplicates on `type` + `value` + `organization_id`).
+- `GET /`: List and filter assets.
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/api/v1/assets/import` | ✅ X-API-Key | Bulk import with deduplication |
-| `GET` | `/api/v1/assets` | — | List assets (filter + paginate) |
-| `GET` | `/api/v1/assets/{id}` | — | Get single asset by UUID |
+### 3. AI Analysis (`/api/v1/analyze`)
+- `POST /query`: Natural language to DB query ("Show me active databases").
+- `GET /risk`: Rule-engine risk assessment with an AI executive summary.
+- `POST /enrich/{id}`: AI classification of asset environment, criticality, and category.
+- `GET /report`: Full automated markdown security report generation.
 
-**Import deduplication:** Assets are identified by `(type, value)`. Re-importing an existing asset updates `last_seen`, merges tags, and merges metadata. It never creates duplicates.
+### 4. AI Agent (`/api/v1/agent`)
+- `POST /chat`: Talk to an autonomous ReAct agent equipped with 5 tools to query the database and perform analysis dynamically.
 
-**List filters:** `?type=certificate&status=stale&tag=production&search=api&page=1&page_size=20`
-
-### AI Analysis
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/analyze/query` | Natural-language asset query |
-| `GET` | `/api/v1/analyze/risk` | Risk scoring + executive summary |
-| `POST` | `/api/v1/analyze/enrich/{id}` | Classify and enrich an asset |
-| `GET` | `/api/v1/analyze/report` | Full security report generation |
-
----
-
-## AI Features — Example Prompts & Outputs
-
-### Feature 1 — Natural-Language Query
-
-**Request:**
-```bash
-curl -X POST http://localhost:8001/api/v1/analyze/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "show me all expired certificates on production"}'
-```
-
-**Response:**
-```json
-{
-  "query": "show me all expired certificates on production",
-  "explanation": "Filtering by certificate type, stale status, and production tag",
-  "filters_applied": {
-    "type": "certificate",
-    "status": "stale",
-    "tag": "production",
-    "search": null
-  },
-  "total": 1,
-  "assets": [...]
-}
-```
-
-**How it works:** The LLM translates the English query into `{type, status, tag, search}` filters. Those filters are applied to the real database. The LLM never sees or returns asset data directly — hallucination is structurally impossible.
-
----
-
-### Feature 2 — Risk Scoring
-
-**Request:**
-```bash
-curl "http://localhost:8001/api/v1/analyze/risk?tag=production"
-```
-
-**Response:**
-```json
-{
-  "total_assets_analyzed": 5,
-  "risk_counts": {"critical": 1, "high": 1, "medium": 1, "low": 0},
-  "findings": [
-    {
-      "asset_value": "22/tcp",
-      "risk_level": "high",
-      "finding": "High-risk service publicly exposed: SSH (22/tcp)",
-      "recommendation": "Restrict SSH access to trusted IPs only."
-    },
-    {
-      "asset_value": "cert.example.com",
-      "risk_level": "high",
-      "finding": "Certificate EXPIRED 908 day(s) ago (expiry: 2024-01-01)",
-      "recommendation": "Renew this certificate immediately."
-    }
-  ],
-  "summary": "The organization's attack surface presents a high risk posture..."
-}
-```
-
-**How it works:** A deterministic Python rule engine runs first (no LLM). Rules flag expired certificates, dangerous ports, EOL technologies, and stale assets. The LLM then writes an executive summary from those findings — it cannot invent risks not present in the rule output.
-
-**Rules applied:**
-- Telnet (23), RDP (3389) exposed → CRITICAL
-- SSH (22), FTP (21) exposed → HIGH
-- Certificate expired → HIGH
-- Certificate expiring within 30 days → HIGH
-- Certificate expiring within 90 days → MEDIUM
-- Technology with version (EOL risk) → MEDIUM
-- Stale domain/subdomain/IP → MEDIUM
-
----
-
-### Feature 3 — Asset Enrichment
-
-**Request:**
-```bash
-curl -X POST http://localhost:8001/api/v1/analyze/enrich/1b4fc8cc-1469-4a5e-a581-3ce4172ba709
-```
-
-**Response:**
-```json
-{
-  "asset_value": "api.example.com",
-  "classification": {
-    "environment": "production",
-    "criticality": "high",
-    "category": "web",
-    "reasoning": "Asset is classified as production/high because tags include 'production' and it is a customer-facing API subdomain.",
-    "suggested_tags": ["api-endpoint", "customer-facing", "external-facing"]
-  },
-  "asset": {
-    "tags": ["api-endpoint", "customer-facing", "external-facing", "high-criticality", "production", "web"],
-    "metadata": {
-      "enrichment": {
-        "environment": "production",
-        "criticality": "high",
-        "category": "web",
-        "enriched_at": "2026-06-26T18:24:52Z"
-      }
-    }
-  }
-}
-```
-
-**How it works:** The LLM classifies the asset into controlled vocabularies (environment: production/staging/development/internal/unknown, criticality: critical/high/medium/low, category: web/infrastructure/security/data/internal/unknown). All LLM output is validated against these sets before being written to the database — invalid values are rejected.
-
----
-
-### Feature 4 — Report Generation
-
-**Request:**
-```bash
-curl "http://localhost:8001/api/v1/analyze/report?tag=production"
-```
-
-**Response:**
-```json
-{
-  "generated_at": "2026-06-26T18:32:28Z",
-  "scope": {"tag": "production", "asset_type": null},
-  "inventory": {
-    "total_assets": 4,
-    "by_type": {"subdomain": 1, "ip_address": 1, "certificate": 1, "domain": 1},
-    "by_status": {"active": 3, "stale": 1}
-  },
-  "risk_counts": {"critical": 0, "high": 1, "medium": 1, "low": 0},
-  "report": "## Executive Summary\nThe organization's production attack surface...\n\n## Asset Inventory\n...\n\n## Risk Analysis\n...\n\n## Recommendations\n1. Renew cert.example.com immediately...\n\n## Conclusion\n..."
-}
-```
-
-**How it works:** Inventory statistics are computed in Python. Risk findings come from the rule engine. The LLM receives structured facts and writes a 5-section report (Executive Summary, Asset Inventory, Risk Analysis, Recommendations, Conclusion). Scoped reports (`?tag=production`) analyze only matching assets.
-
----
-
-
-## Assumptions
-
-The following assumptions were made during development:
-
-- **Sample dataset not yet received:** The import endpoint accepts any JSON matching the documented asset schema. It is ready to receive the actual DarkAtlas scan dataset when provided.
-- **Metadata merge strategy:** When the same asset is imported twice with conflicting metadata, new values overwrite existing ones for the same key. Existing keys not present in the new import are preserved. Tags are always union-merged (never removed).
-- **Re-appearing stale assets:** If an asset is marked `stale` and then re-imported or re-scanned, it is automatically reset to `active`. This reflects the assumption that re-discovery means the asset is live again.
-- **Single-tenant scope:** Multi-tenant isolation is not implemented. All assets belong to a single shared namespace. This would be the first extension in a production deployment.
-- **LLM for narrative only:** The LLM is never used to make security decisions. All risk scores are produced by deterministic Python rules. The LLM writes human-readable summaries and classifications only.
-- **HTTP in development:** The API runs over HTTP in local/Docker development. In production, HTTPS termination would be handled by a reverse proxy (Nginx, Caddy, or a cloud load balancer).
-- **API key authentication:** Write operations are protected by a static API key (`X-API-Key` header). In production this would be replaced with JWT or OAuth2 with per-user scoping.
-- **Port 8001 locally:** The API is exposed on port 8001 (not 8000) to avoid conflicts with other local services. This can be changed in `docker-compose.yml`.
-
-## Design Decisions
-
-### 1. Anti-hallucination grounding strategy
-The LLM is never given free access to asset data. In every feature:
-- **Query (Ph.4):** LLM outputs filters only. Assets come from DB.
-- **Risk (Ph.5):** Rules run first. LLM only narrates rule outputs.
-- **Enrichment (Ph.6):** LLM outputs classification labels validated against enums.
-- **Report (Ph.7):** LLM receives structured facts and writes narrative only.
-
-### 2. Rule engine before LLM for risk scoring
-Deterministic Python rules produce consistent, auditable, fast risk scores. The LLM is used only for the narrative — not the scoring decision. This means risk scores do not change between runs and can be reasoned about independently of LLM behavior.
-
-### 3. Upsert deduplication at the database level
-The `UNIQUE(type, value)` constraint on the `assets` table enforces deduplication at the database level — even if application code has a bug, Postgres will reject duplicates. The application layer checks for existing assets first and updates (merges tags, updates `last_seen`) rather than inserting.
-
-### 4. Async throughout
-FastAPI, SQLAlchemy, and LangChain are all used in async mode. This means the server handles other requests while waiting for Groq API responses (which can take 1–3 seconds). A synchronous design would block the entire server during LLM calls.
-
-### 5. Separation of concerns
-- Routes handle only HTTP concerns (request parsing, response formatting, error codes)
-- Services handle business logic and database operations
-- Analysis services handle LLM interaction
-- Models define data shape
-- Schemas define API contracts
-
-### 6. Provider-agnostic LLM layer
-The `get_llm()` factory in `base.py` supports Groq, Anthropic, and OpenAI via a single `LLM_PROVIDER` environment variable. Switching providers requires only a `.env` change — no code changes.
+### 5. Evaluation Harness (`/api/v1/eval`)
+- `POST /risk`, `POST /report`, `POST /query`: Triggers an "LLM-as-a-judge" to evaluate the AI outputs on relevance, clarity, and hallucination metrics.
 
 ---
 
 ## Running Tests
 
+We have **43 automated tests** covering risk rules, schemas, and the evaluation harness.
+
 ```bash
 # Run all tests inside Docker
-docker exec -it intern-api-1 pytest tests/ -v
-
-# Expected output: 34 passed
+docker-compose exec -T api pytest tests/ -v
 ```
-
-Tests cover:
-- Risk rule engine: expired certs, dangerous ports, stale assets, severity ordering
-- Schema validation: value normalization, tag cleaning, type validation, bulk limits
 
 Tests are pure Python — no database or LLM calls required.
 
@@ -414,27 +149,10 @@ Tests are pure Python — no database or LLM calls required.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | (set by docker-compose) | PostgreSQL connection string |
-| `API_KEY` | Yes | `dev-api-key-...` | Key required for write operations (`X-API-Key` header) |
+| `DATABASE_URL` | Yes | (set by docker) | PostgreSQL connection string |
+| `API_KEY` | Yes | `dev-api-key...` | Master Admin Key (`X-API-Key` header) |
+| `DEFAULT_ORG_ID`| Yes | `default` | Fallback Org ID if `X-Org-Id` isn't provided |
 | `LLM_PROVIDER` | Yes | `groq` | LLM provider: `groq`, `anthropic`, or `openai` |
-| `GROQ_API_KEY` | If using Groq | — | API key from console.groq.com |
-| `ANTHROPIC_API_KEY` | If using Anthropic | — | API key from console.anthropic.com |
-| `OPENAI_API_KEY` | If using OpenAI | — | API key from platform.openai.com |
-| `LLM_MODEL` | Yes | `llama-3.3-70b-versatile` | Model name for the chosen provider |
-| `DEBUG` | No | `false` | Set to `true` to log all SQL queries |
-
-> **Security note:** Never commit `.env` to version control. The `.gitignore` excludes it. Use `.env.example` as the template.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| API framework | FastAPI 0.115 + Uvicorn |
-| Database | PostgreSQL 16 + SQLAlchemy 2.0 (async) |
-| Migrations | Auto-create via `Base.metadata.create_all` on startup |
-| AI / LLM | LangChain 0.3 + Groq (Llama 3.3 70B) |
-| Validation | Pydantic v2 |
-| Testing | pytest 8.3 + pytest-asyncio |
-| Infrastructure | Docker + Docker Compose |
+| `GROQ_API_KEY` | If Groq | — | API key from console.groq.com |
+| `LLM_MODEL` | Yes | `llama-3.3-70b...`| Model name for the chosen provider |
+| `RATE_LIMIT_*` | Yes | `60/minute` | Global and LLM rate limit configurations |
