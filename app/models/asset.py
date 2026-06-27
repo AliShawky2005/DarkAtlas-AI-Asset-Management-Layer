@@ -2,6 +2,9 @@
 ORM models for the two core tables:
   - assets             — every internet-facing resource being tracked
   - asset_relationships — directed edges between assets (the graph layer)
+
+Bonus 1: Each asset and relationship now carries an organization_id
+so data from different tenants is completely isolated at the DB level.
 """
 
 import uuid
@@ -57,19 +60,29 @@ class Asset(Base):
     """
     One row = one internet-facing resource.
 
-    Natural key: (type, value) must be unique.
-    This is the foundation of deduplication in Phase 2.
+    Natural key: (type, value, organization_id) must be unique.
+    The organization_id scopes every asset to one tenant (Bonus 1).
     """
     __tablename__ = "assets"
 
     __table_args__ = (
-        UniqueConstraint("type", "value", name="uq_asset_type_value"),
+        # Bonus 1: dedup key now includes org so org A and org B can both
+        # track the same domain independently.
+        UniqueConstraint("type", "value", "organization_id", name="uq_asset_type_value_org"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+    )
+
+    # Bonus 1: every asset belongs to one organization
+    organization_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="default",
+        index=True,
     )
 
     type: Mapped[AssetType] = mapped_column(
@@ -137,7 +150,7 @@ class Asset(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Asset {self.type}:{self.value} [{self.status}]>"
+        return f"<Asset {self.type}:{self.value} [{self.status}] org={self.organization_id}>"
 
 
 # ── AssetRelationship model ───────────────────────────────────────────────────

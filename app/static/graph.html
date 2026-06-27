@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DarkAtlas — Asset Relationship Graph</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0a0d14;
+      color: #e2e8f0;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+      border-bottom: 1px solid #1e3a5f;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .logo-text { font-size: 18px; font-weight: 700; color: #f1f5f9; }
+    .logo-sub  { font-size: 12px; color: #64748b; margin-top: 1px; }
+
+    .header-controls {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .org-input {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 6px 12px;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-family: inherit;
+      width: 160px;
+    }
+    .org-input:focus { outline: none; border-color: #3b82f6; }
+    .btn {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 7px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn.secondary {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+    }
+    .stats-bar {
+      display: flex; gap: 16px; align-items: center;
+      font-size: 12px; color: #64748b;
+    }
+    .stat { display: flex; align-items: center; gap: 4px; }
+    .stat-val { color: #e2e8f0; font-weight: 600; }
+
+    /* ── Main layout ─────────────────────────────────────────────────────── */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Graph canvas ────────────────────────────────────────────────────── */
+    #graph-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    svg {
+      width: 100%; height: 100%;
+      background: radial-gradient(ellipse at center, #0f1929 0%, #0a0d14 70%);
+    }
+
+    /* ── Edges ───────────────────────────────────────────────────────────── */
+    .link {
+      stroke: #1e3a5f;
+      stroke-width: 1.5;
+      stroke-opacity: 0.7;
+    }
+    .link:hover { stroke: #3b82f6; stroke-width: 2.5; }
+    .link-label {
+      font-size: 10px;
+      fill: #475569;
+      pointer-events: none;
+    }
+
+    /* ── Nodes ───────────────────────────────────────────────────────────── */
+    .node circle {
+      stroke-width: 2;
+      cursor: pointer;
+      transition: filter 0.2s;
+    }
+    .node circle:hover { filter: brightness(1.3) drop-shadow(0 0 8px currentColor); }
+    .node.selected circle {
+      stroke-width: 3;
+      filter: brightness(1.4) drop-shadow(0 0 12px currentColor);
+    }
+    .node-label {
+      font-size: 11px;
+      fill: #94a3b8;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* ── Side panel ──────────────────────────────────────────────────────── */
+    #side-panel {
+      width: 300px;
+      background: #0f172a;
+      border-left: 1px solid #1e293b;
+      overflow-y: auto;
+      flex-shrink: 0;
+      transition: width 0.3s;
+    }
+    #side-panel.collapsed { width: 0; border-left: none; overflow: hidden; }
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid #1e293b;
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .close-btn {
+      background: none; border: none; color: #475569;
+      cursor: pointer; font-size: 16px; padding: 0;
+    }
+    .close-btn:hover { color: #94a3b8; }
+    .panel-content { padding: 16px; }
+    .asset-type-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+    .asset-value {
+      font-size: 15px;
+      font-weight: 600;
+      color: #f1f5f9;
+      word-break: break-all;
+      margin-bottom: 12px;
+    }
+    .field-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #1e293b;
+      font-size: 12px;
+    }
+    .field-label { color: #64748b; }
+    .field-val   { color: #cbd5e1; font-weight: 500; }
+    .tag-chip {
+      display: inline-block;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: #94a3b8;
+      margin: 2px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 14px 0 6px;
+    }
+    .rel-item {
+      font-size: 12px;
+      color: #94a3b8;
+      padding: 4px 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .rel-arrow { color: #3b82f6; }
+
+    /* ── Legend ──────────────────────────────────────────────────────────── */
+    #legend {
+      position: absolute;
+      bottom: 16px; left: 16px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 12px 16px;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+    }
+    .legend-title {
+      font-size: 11px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+    .legend-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── Toast ───────────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 13px;
+      color: #e2e8f0;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s;
+      z-index: 999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+
+    /* ── Loading overlay ─────────────────────────────────────────────────── */
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 13, 20, 0.9);
+      z-index: 50;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #1e293b;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p { color: #64748b; font-size: 13px; }
+    #loading.hidden { display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🌐</div>
+    <div>
+      <div class="logo-text">DarkAtlas</div>
+      <div class="logo-sub">Asset Relationship Graph</div>
+    </div>
+  </div>
+  <div class="header-controls">
+    <input class="org-input" id="org-id-input" placeholder="Organization ID" value="default" />
+    <input class="org-input" id="api-key-input" placeholder="API Key" type="password" style="width:180px" />
+    <button class="btn" onclick="loadGraph()">🔄 Refresh</button>
+    <button class="btn secondary" onclick="resetZoom()">⊕ Fit</button>
+    <div class="stats-bar">
+      <div class="stat">Nodes: <span class="stat-val" id="node-count">–</span></div>
+      <div class="stat">Edges: <span class="stat-val" id="edge-count">–</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+  <div id="graph-container">
+    <svg id="graph-svg"></svg>
+
+    <div id="legend">
+      <div class="legend-title">Asset Types</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>Domain</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>Subdomain</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>IP Address</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Service</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Certificate</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Technology</div>
+    </div>
+
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>Loading asset graph…</p>
+    </div>
+  </div>
+
+  <div id="side-panel" class="collapsed">
+    <div class="panel-header">
+      Asset Details
+      <button class="close-btn" onclick="closePanel()">✕</button>
+    </div>
+    <div class="panel-content" id="panel-body"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Color map ─────────────────────────────────────────────────────────────────
+const TYPE_COLORS = {
+  domain:      "#3b82f6",
+  subdomain:   "#8b5cf6",
+  ip_address:  "#10b981",
+  service:     "#f59e0b",
+  certificate: "#ef4444",
+  technology:  "#6366f1",
+};
+const STATUS_OPACITY = { active: 1.0, stale: 0.45, archived: 0.25 };
+
+function nodeColor(d) { return TYPE_COLORS[d.type] || "#64748b"; }
+function nodeRadius(d) { return Math.max(8, Math.min(24, 8 + (d.relCount || 0) * 2)); }
+
+// ── Graph state ───────────────────────────────────────────────────────────────
+let simulation, svg, g, zoom;
+let allNodes = [], allEdges = [], selectedNode = null;
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, dur = 3000) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), dur);
+}
+
+// ── Load graph from API ───────────────────────────────────────────────────────
+async function loadGraph() {
+  const orgId  = document.getElementById("org-id-input").value.trim() || "default";
+  const apiKey = document.getElementById("api-key-input").value.trim();
+  document.getElementById("loading").classList.remove("hidden");
+
+  const headers = { "X-Org-Id": orgId };
+  if (apiKey) headers["X-API-Key"] = apiKey;
+
+  try {
+    const resp = await fetch("/api/v1/graph/data", { headers });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      toast(`❌ Error: ${err.detail || resp.statusText}`);
+      return;
+    }
+    const data = await resp.json();
+    allNodes = data.nodes || [];
+    allEdges = data.edges || [];
+
+    // Count relationships per node
+    const relMap = {};
+    allEdges.forEach(e => {
+      relMap[e.source] = (relMap[e.source] || 0) + 1;
+      relMap[e.target] = (relMap[e.target] || 0) + 1;
+    });
+    allNodes.forEach(n => n.relCount = relMap[n.id] || 0);
+
+    document.getElementById("node-count").textContent = allNodes.length;
+    document.getElementById("edge-count").textContent = allEdges.length;
+
+    renderGraph(allNodes, allEdges);
+    toast(`✅ Loaded ${allNodes.length} assets, ${allEdges.length} relationships`);
+  } catch (e) {
+    toast(`❌ Failed to connect: ${e.message}`);
+  } finally {
+    document.getElementById("loading").classList.add("hidden");
+  }
+}
+
+// ── Render D3 force graph ─────────────────────────────────────────────────────
+function renderGraph(nodes, edges) {
+  const container = document.getElementById("graph-container");
+  const W = container.clientWidth, H = container.clientHeight;
+
+  d3.select("#graph-svg").selectAll("*").remove();
+
+  svg = d3.select("#graph-svg");
+  zoom = d3.zoom()
+    .scaleExtent([0.1, 4])
+    .on("zoom", e => g.attr("transform", e.transform));
+  svg.call(zoom);
+
+  g = svg.append("g");
+
+  // ── Arrow marker ────────────────────────────────────────────────────────────
+  svg.append("defs").append("marker")
+    .attr("id", "arrow")
+    .attr("viewBox", "0 -5 10 10")
+    .attr("refX", 22).attr("refY", 0)
+    .attr("markerWidth", 6).attr("markerHeight", 6)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("d", "M0,-5L10,0L0,5")
+    .attr("fill", "#1e3a5f");
+
+  // ── Simulation ──────────────────────────────────────────────────────────────
+  simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(edges).id(d => d.id).distance(120).strength(0.5))
+    .force("charge", d3.forceManyBody().strength(-300))
+    .force("center", d3.forceCenter(W / 2, H / 2))
+    .force("collision", d3.forceCollide().radius(d => nodeRadius(d) + 10));
+
+  // ── Edges ───────────────────────────────────────────────────────────────────
+  const link = g.append("g").selectAll("line")
+    .data(edges).enter().append("line")
+    .attr("class", "link")
+    .attr("marker-end", "url(#arrow)");
+
+  const linkLabel = g.append("g").selectAll("text")
+    .data(edges).enter().append("text")
+    .attr("class", "link-label")
+    .text(d => d.label);
+
+  // ── Nodes ───────────────────────────────────────────────────────────────────
+  const node = g.append("g").selectAll(".node")
+    .data(nodes).enter().append("g")
+    .attr("class", "node")
+    .call(d3.drag()
+      .on("start", (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag",  (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on("end",   (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+    )
+    .on("click", (e, d) => { e.stopPropagation(); selectNode(d, edges); });
+
+  node.append("circle")
+    .attr("r", d => nodeRadius(d))
+    .attr("fill", d => nodeColor(d))
+    .attr("fill-opacity", d => STATUS_OPACITY[d.status] || 0.8)
+    .attr("stroke", d => nodeColor(d))
+    .attr("stroke-opacity", 0.6);
+
+  node.append("text")
+    .attr("class", "node-label")
+    .attr("x", d => nodeRadius(d) + 5)
+    .attr("dy", "0.35em")
+    .text(d => d.value.length > 30 ? d.value.slice(0, 28) + "…" : d.value);
+
+  // ── Tick ────────────────────────────────────────────────────────────────────
+  simulation.on("tick", () => {
+    link
+      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    linkLabel
+      .attr("x", d => (d.source.x + d.target.x) / 2)
+      .attr("y", d => (d.source.y + d.target.y) / 2);
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+  });
+
+  // Click on background to deselect
+  svg.on("click", () => { selectedNode = null; closePanel(); });
+}
+
+// ── Node selection & side panel ───────────────────────────────────────────────
+function selectNode(d, edges) {
+  selectedNode = d;
+  d3.selectAll(".node").classed("selected", n => n.id === d.id);
+
+  const related = edges
+    .filter(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      return sid === d.id || tid === d.id;
+    })
+    .map(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      const otherId = sid === d.id ? tid : sid;
+      const direction = sid === d.id ? "→" : "←";
+      const other = allNodes.find(n => n.id === otherId);
+      return { label: e.label, direction, other };
+    });
+
+  const color = TYPE_COLORS[d.type] || "#64748b";
+  let html = `
+    <span class="asset-type-badge" style="background:${color}22;color:${color};border:1px solid ${color}44">
+      ${d.type.replace("_", " ")}
+    </span>
+    <div class="asset-value">${d.value}</div>
+    <div class="field-row"><span class="field-label">Status</span><span class="field-val">${d.status}</span></div>
+    <div class="field-row"><span class="field-label">ID</span><span class="field-val" style="font-size:10px">${d.id}</span></div>
+    <div class="field-row"><span class="field-label">Relationships</span><span class="field-val">${d.relCount}</span></div>
+  `;
+
+  if (d.tags && d.tags.length > 0) {
+    html += `<div class="section-title">Tags</div>`;
+    html += d.tags.map(t => `<span class="tag-chip">${t}</span>`).join("");
+  }
+
+  if (related.length > 0) {
+    html += `<div class="section-title">Connections (${related.length})</div>`;
+    related.slice(0, 15).forEach(r => {
+      const otherName = r.other ? r.other.value : "(unknown)";
+      html += `<div class="rel-item">
+        <span class="rel-arrow">${r.direction}</span>
+        <span style="color:#475569">${r.label}</span>
+        <span>${otherName.length > 25 ? otherName.slice(0,23)+"…" : otherName}</span>
+      </div>`;
+    });
+  }
+
+  document.getElementById("panel-body").innerHTML = html;
+  document.getElementById("side-panel").classList.remove("collapsed");
+}
+
+function closePanel() {
+  document.getElementById("side-panel").classList.add("collapsed");
+  d3.selectAll(".node").classed("selected", false);
+  selectedNode = null;
+}
+
+function resetZoom() {
+  svg && svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+}
+
+// ── Auto-load on page open ────────────────────────────────────────────────────
+window.addEventListener("load", () => {
+  // Pre-fill API key from localStorage if saved
+  const saved = localStorage.getItem("darkatlas_api_key");
+  if (saved) document.getElementById("api-key-input").value = saved;
+
+  // Save key on change
+  document.getElementById("api-key-input").addEventListener("change", e => {
+    localStorage.setItem("darkatlas_api_key", e.target.value);
+  });
+
+  loadGraph();
+});
+</script>
+</body>
+</html>

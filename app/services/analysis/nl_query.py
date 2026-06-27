@@ -118,7 +118,7 @@ EXAMPLES:
 
 # ── Main function ─────────────────────────────────────────────────────────────
 
-async def natural_language_query(db: AsyncSession, query: str) -> dict:
+async def natural_language_query(db: AsyncSession, query: str, organization_id: str = "default") -> dict:
     """
     Translates a natural language query into a database query.
 
@@ -171,6 +171,7 @@ async def natural_language_query(db: AsyncSession, query: str) -> dict:
     # This is the grounding step — results come from DB, not from the LLM
     results = await list_assets(
         db,
+        organization_id=organization_id,
         asset_type=asset_type,
         status=status,
         tag=tag,

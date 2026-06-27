@@ -5,6 +5,8 @@
 # If you define a new model and forget to import it here,
 # its table will never be created. This is a common gotcha.
 from app.models.asset import Asset, AssetRelationship, AssetType, AssetStatus, AssetSource
+from app.models.organization import Organization
+from app.models.api_key import ApiKey, Role
 
 __all__ = [
     "Asset",
@@ -12,4 +14,7 @@ __all__ = [
     "AssetType",
     "AssetStatus",
     "AssetSource",
+    "Organization",
+    "ApiKey",
+    "Role",
 ]

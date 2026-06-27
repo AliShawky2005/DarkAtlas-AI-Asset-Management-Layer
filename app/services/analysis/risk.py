@@ -20,8 +20,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cachetools import TTLCache
+
 from app.services.analysis.base import DARKATLAS_SYSTEM_PROMPT, get_llm
-from app.services.asset_service import list_assets
+from app.services.asset_service import get_all_assets_for_analysis
+
+# Cache LLM summaries for 5 minutes — keyed by (org_id, tag, asset_type)
+_risk_cache: TTLCache = TTLCache(maxsize=128, ttl=300)
 
 
 # ── Risk severity ordering ────────────────────────────────────────────────────
@@ -340,6 +345,7 @@ async def analyze_risk(
     db: AsyncSession,
     tag: Optional[str] = None,
     asset_type_filter: Optional[str] = None,
+    organization_id: str = "default",
 ) -> RiskSummaryResponse:
     """
     Full risk analysis pipeline.
@@ -354,19 +360,18 @@ async def analyze_risk(
       tag=production  → only analyze production assets
       type=certificate → only analyze certificates
     """
-    from app.models.asset import AssetType as AT
+    # Check cache first (keyed by org + filters)
+    cache_key = (organization_id, tag, asset_type_filter)
+    if cache_key in _risk_cache:
+        return _risk_cache[cache_key]
 
-    # Resolve optional type filter
-    atype = None
-    if asset_type_filter:
-        try:
-            atype = AT(asset_type_filter.strip().lower())
-        except ValueError:
-            pass
-
-    # Fetch assets (up to 200 per analysis run)
-    results = await list_assets(db, asset_type=atype, tag=tag, page=1, page_size=200)
-    assets_data = [a.model_dump() for a in results.assets]
+    # Fetch assets scoped to this org
+    assets_data = await get_all_assets_for_analysis(
+        db,
+        organization_id=organization_id,
+        tag=tag,
+        asset_type_filter=asset_type_filter,
+    )
 
     # Rule-based scoring — pure Python, no LLM
     findings = score_assets(assets_data)
@@ -380,10 +385,12 @@ async def analyze_risk(
     # LLM writes the narrative summary from the findings
     summary = await generate_risk_summary(findings, len(assets_data), risk_counts)
 
-    return RiskSummaryResponse(
+    result = RiskSummaryResponse(
         total_assets_analyzed=len(assets_data),
         risk_counts=risk_counts,
         findings=findings,
         summary=summary,
         analyzed_at=datetime.now(timezone.utc).isoformat(),
     )
+    _risk_cache[cache_key] = result
+    return result

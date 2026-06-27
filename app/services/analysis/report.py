@@ -20,7 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.analysis.base import DARKATLAS_SYSTEM_PROMPT, get_llm, format_assets_for_prompt
 from app.services.analysis.risk import score_assets
-from app.services.asset_service import list_assets
+from app.services.asset_service import get_all_assets_for_analysis
+from cachetools import TTLCache
+
+# Cache report results for 5 minutes keyed by (org_id, tag, asset_type_filter)
+_report_cache: TTLCache = TTLCache(maxsize=64, ttl=300)
 
 
 # ── Response schema ───────────────────────────────────────────────────────────
@@ -121,6 +125,7 @@ async def generate_report(
     db: AsyncSession,
     tag: Optional[str] = None,
     asset_type_filter: Optional[str] = None,
+    organization_id: str = "default",
 ) -> ReportResponse:
     """
     Generate a full natural-language security report.
@@ -132,18 +137,17 @@ async def generate_report(
       4. LLM writes the full report from the structured data
       5. Return report with metadata
     """
-    from app.models.asset import AssetType as AT
+    cache_key = (organization_id, tag, asset_type_filter)
+    if cache_key in _report_cache:
+        return _report_cache[cache_key]
 
-    atype = None
-    if asset_type_filter:
-        try:
-            atype = AT(asset_type_filter.strip().lower())
-        except ValueError:
-            pass
-
-    # Fetch assets (up to 200)
-    results = await list_assets(db, asset_type=atype, tag=tag, page=1, page_size=200)
-    assets_data = [a.model_dump() for a in results.assets]
+    # Fetch assets scoped to org
+    assets_data = await get_all_assets_for_analysis(
+        db,
+        organization_id=organization_id,
+        tag=tag,
+        asset_type_filter=asset_type_filter,
+    )
 
     if not assets_data:
         return ReportResponse(
@@ -187,10 +191,12 @@ async def generate_report(
         "risk_text": risk_text,
     })
 
-    return ReportResponse(
+    result = ReportResponse(
         generated_at=datetime.now(timezone.utc).isoformat(),
-        scope={"tag": tag, "asset_type": asset_type_filter},
+        scope={"tag": tag, "asset_type": asset_type_filter, "organization_id": organization_id},
         inventory=inventory,
         risk_counts=risk_counts,
         report=report_text,
     )
+    _report_cache[cache_key] = result
+    return result

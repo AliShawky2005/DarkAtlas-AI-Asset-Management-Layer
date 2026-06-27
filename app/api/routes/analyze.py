@@ -1,20 +1,26 @@
 """
 Analysis routes — AI-powered endpoints.
 
-Phase 3: GET  /health          — LLM connection test         ✅
-Phase 4: POST /query           — natural-language query       ✅
-Phase 5: GET  /risk            — risk scoring & summary       ✅
-Phase 6: POST /enrich/{id}     — asset enrichment             ✅
-Phase 7: GET  /report          — report generation            ✅
+Bonus 1: All analysis scoped to org (X-Org-Id)
+Bonus 2: require_reader on all read endpoints
+Bonus 4: Rate limiting on LLM endpoints (10/minute)
+
+GET  /health          — LLM connection test
+POST /query           — natural-language query
+GET  /risk            — risk scoring & summary
+POST /enrich/{id}     — asset enrichment
+GET  /report          — report generation
 """
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_org_id, require_reader, require_admin
+from app.middleware.rate_limit import limiter
+from app.models.api_key import ApiKey
 from app.services.analysis.base import test_llm_connection
 from app.services.analysis.enrichment import enrich_asset
 from app.services.analysis.nl_query import natural_language_query
@@ -24,7 +30,7 @@ from app.services.analysis.report import ReportResponse, generate_report
 router = APIRouter()
 
 
-# ── Phase 3: LLM health check ─────────────────────────────────────────────────
+# ── LLM health check ──────────────────────────────────────────────────────────
 
 @router.get("/health", summary="Test LLM connection")
 async def analyze_health():
@@ -37,7 +43,7 @@ async def analyze_health():
         raise HTTPException(status_code=503, detail=f"LLM provider unreachable: {e}")
 
 
-# ── Phase 4: Natural-language asset query ─────────────────────────────────────
+# ── Natural-language asset query ──────────────────────────────────────────────
 
 class NLQueryRequest(BaseModel):
     query: str = Field(
@@ -55,20 +61,25 @@ class NLQueryRequest(BaseModel):
         "Ask a question in plain English and get matching assets from the database.\n\n"
         "**Examples:** `show me all expired certificates` · "
         "`find production subdomains with api in the name` · "
-        "`list all active ip addresses`"
+        "`list all active ip addresses`\n\n"
+        "**Rate limit:** 10 requests/minute. Requires reader key."
     ),
 )
+@limiter.limit("10/minute")
 async def nl_query(
-    request: NLQueryRequest,
+    request: Request,   # required by slowapi
+    body: NLQueryRequest,
     db: AsyncSession = Depends(get_db),
+    org_id: str = Depends(get_org_id),
+    _key: ApiKey = Depends(require_reader),
 ):
     try:
-        return await natural_language_query(db, request.query)
+        return await natural_language_query(db, body.query, organization_id=org_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
 
 
-# ── Phase 5: Risk scoring ─────────────────────────────────────────────────────
+# ── Risk scoring ──────────────────────────────────────────────────────────────
 
 @router.get(
     "/risk",
@@ -78,21 +89,26 @@ async def nl_query(
         "Analyzes assets using security rules, then generates an AI executive summary.\n\n"
         "**Rules:** expired certs → HIGH · Telnet/RDP exposed → CRITICAL · "
         "SSH public → HIGH · EOL technology → MEDIUM · stale assets → MEDIUM\n\n"
-        "Use `tag=production` to scope analysis to production assets only."
+        "Use `tag=production` to scope analysis to production assets only.\n\n"
+        "**Rate limit:** 10/min. Results cached 5 minutes. Requires reader key."
     ),
 )
+@limiter.limit("10/minute")
 async def risk_analysis(
+    request: Request,
     tag: Optional[str] = Query(None, description="Scope to assets with this tag"),
     asset_type: Optional[str] = Query(None, description="Scope to a specific asset type"),
     db: AsyncSession = Depends(get_db),
+    org_id: str = Depends(get_org_id),
+    _key: ApiKey = Depends(require_reader),
 ) -> RiskSummaryResponse:
     try:
-        return await analyze_risk(db, tag=tag, asset_type_filter=asset_type)
+        return await analyze_risk(db, tag=tag, asset_type_filter=asset_type, organization_id=org_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Risk analysis failed: {e}")
 
 
-# ── Phase 6: Asset enrichment ─────────────────────────────────────────────────
+# ── Asset enrichment ──────────────────────────────────────────────────────────
 
 @router.post(
     "/enrich/{asset_id}",
@@ -100,25 +116,26 @@ async def risk_analysis(
     description=(
         "Uses the LLM to classify an asset by environment, criticality, and category, "
         "then saves the enrichment back to the database.\n\n"
-        "**Classifications:**\n"
-        "- `environment`: production · staging · development · internal · unknown\n"
-        "- `criticality`: critical · high · medium · low\n"
-        "- `category`: web · infrastructure · security · data · internal · unknown"
+        "**Requires admin key** (writes to DB)."
     ),
 )
+@limiter.limit("10/minute")
 async def enrich_asset_endpoint(
+    request: Request,
     asset_id: str,
     db: AsyncSession = Depends(get_db),
+    org_id: str = Depends(get_org_id),
+    _key: ApiKey = Depends(require_admin),
 ):
     try:
-        return await enrich_asset(db, asset_id)
+        return await enrich_asset(db, asset_id, organization_id=org_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Enrichment failed: {e}")
 
 
-# ── Phase 7: Report generation ────────────────────────────────────────────────
+# ── Report generation ─────────────────────────────────────────────────────────
 
 @router.get(
     "/report",
@@ -128,15 +145,19 @@ async def enrich_asset_endpoint(
         "Generates a complete written attack surface management report.\n\n"
         "**Sections:** Executive Summary · Asset Inventory · "
         "Risk Analysis · Recommendations · Conclusion\n\n"
-        "Use `tag=production` to generate a production-only report."
+        "**Rate limit:** 10/min. Results cached 5 minutes. Requires reader key."
     ),
 )
+@limiter.limit("10/minute")
 async def generate_report_endpoint(
+    request: Request,
     tag: Optional[str] = Query(None, description="Scope report to assets with this tag"),
     asset_type: Optional[str] = Query(None, description="Scope report to a specific asset type"),
     db: AsyncSession = Depends(get_db),
+    org_id: str = Depends(get_org_id),
+    _key: ApiKey = Depends(require_reader),
 ) -> ReportResponse:
     try:
-        return await generate_report(db, tag=tag, asset_type_filter=asset_type)
+        return await generate_report(db, tag=tag, asset_type_filter=asset_type, organization_id=org_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")

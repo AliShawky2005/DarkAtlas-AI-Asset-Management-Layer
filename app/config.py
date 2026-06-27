@@ -18,8 +18,11 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://darkatlas:darkatlas@localhost:5432/darkatlas"
     )
 
-    # ── Security ──────────────────────────────────────────────────────────────
+    # ── Security (Bonus 2 — RBAC) ─────────────────────────────────────────────
+    # Legacy single key kept for backwards-compat; superseded by ApiKey table
     API_KEY: str = "dev-api-key-change-in-production"
+    # Default org used when no X-Org-Id header is provided
+    DEFAULT_ORG_ID: str = "default"
 
     # ── LLM provider ─────────────────────────────────────────────────────────
     # Supported: "groq" | "anthropic" | "openai"
@@ -36,8 +39,12 @@ class Settings(BaseSettings):
     #   openai    → gpt-4o
     LLM_MODEL: str = "llama-3.3-70b-versatile"
 
+    # ── Rate limiting (Bonus 4) ───────────────────────────────────────────────
+    RATE_LIMIT_DEFAULT: str = "60/minute"     # global limit per IP
+    RATE_LIMIT_LLM: str = "10/minute"         # stricter limit for LLM endpoints
+
     # ── App ───────────────────────────────────────────────────────────────────
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "2.0.0"
     DEBUG: bool = False
 
 

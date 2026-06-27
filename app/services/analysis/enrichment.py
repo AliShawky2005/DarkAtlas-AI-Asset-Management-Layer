@@ -214,7 +214,7 @@ def _validate_classification(raw: AssetClassification) -> AssetClassification:
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-async def enrich_asset(db: AsyncSession, asset_id: str) -> dict:
+async def enrich_asset(db: AsyncSession, asset_id: str, organization_id: str = "default") -> dict:
     """
     Classify an asset using the LLM and save the enrichment to the DB.
 
@@ -223,9 +223,9 @@ async def enrich_asset(db: AsyncSession, asset_id: str) -> dict:
       - classification: what the LLM decided
       - asset: the full updated asset
     """
-    # Step 1: Fetch the real asset
+    # Step 1: Fetch the real asset (scoped to org)
     asset = await _get_asset(db, asset_id)
-    if not asset:
+    if not asset or asset.organization_id != organization_id:
         raise ValueError(f"Asset '{asset_id}' not found.")
 
     # Step 2: Build prompt context from real asset data

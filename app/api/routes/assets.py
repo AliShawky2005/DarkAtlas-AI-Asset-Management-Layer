@@ -1,20 +1,18 @@
 """
-Asset routes — HTTP layer only.
+Asset routes — HTTP layer only. Bonus 1 + 2 applied.
 
-Each route does three things:
-  1. Validate input (Pydantic does this automatically)
-  2. Call the service layer
-  3. Return the response
-
-No business logic lives here. No SQL lives here.
+Changes from v1:
+  - org_id injected from X-Org-Id header (multi-tenancy)
+  - require_admin on write ops, require_reader on reads (RBAC)
 """
 
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import AsyncSession, get_db, require_api_key
+from app.api.deps import AsyncSession, get_db, get_org_id, require_admin, require_reader
 from app.models.asset import AssetStatus, AssetType
+from app.models.api_key import ApiKey
 from app.schemas.asset import (
     AssetListResponse,
     AssetResponse,
@@ -37,39 +35,24 @@ router = APIRouter()
     summary="Bulk import assets",
     description=(
         "Import up to 1000 assets in one request. "
-        "Existing assets (matched by type + value) are updated, not duplicated. "
-        "Requires X-API-Key header."
+        "Existing assets (matched by type + value + org) are updated, not duplicated. "
+        "**Requires admin role.**"
     ),
-    dependencies=[Depends(require_api_key)],  # auth enforced here
 )
 async def import_assets(
     request: BulkImportRequest,
     db: AsyncSession = Depends(get_db),
+    org_id: str = Depends(get_org_id),
+    _key: ApiKey = Depends(require_admin),   # RBAC: admin only
 ) -> BulkImportResponse:
-    """
-    Bulk import endpoint — the main data ingestion route.
-
-    Send a JSON body like:
-    {
-      "assets": [
-        {
-          "type": "domain",
-          "value": "example.com",
-          "tags": ["production"],
-          "metadata": {},
-          "relationships": []
-        }
-      ]
-    }
-    """
-    return await bulk_import_assets(db, request)
+    return await bulk_import_assets(db, request, organization_id=org_id)
 
 
 @router.get(
     "",
     response_model=AssetListResponse,
     summary="List assets",
-    description="Retrieve assets with optional filtering and pagination.",
+    description="Retrieve assets with optional filtering and pagination. Requires any valid API key.",
 )
 async def get_assets(
     asset_type: AssetType | None = Query(None, alias="type", description="Filter by asset type"),
@@ -79,9 +62,12 @@ async def get_assets(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Results per page"),
     db: AsyncSession = Depends(get_db),
+    org_id: str = Depends(get_org_id),
+    _key: ApiKey = Depends(require_reader),  # RBAC: reader or admin
 ) -> AssetListResponse:
     return await list_assets(
         db,
+        organization_id=org_id,
         asset_type=asset_type,
         status=status,
         tag=tag,
@@ -99,8 +85,10 @@ async def get_assets(
 async def get_asset(
     asset_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    org_id: str = Depends(get_org_id),
+    _key: ApiKey = Depends(require_reader),  # RBAC: reader or admin
 ) -> AssetResponse:
-    asset = await get_asset_by_id(db, asset_id)
+    asset = await get_asset_by_id(db, asset_id, organization_id=org_id)
     if not asset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
